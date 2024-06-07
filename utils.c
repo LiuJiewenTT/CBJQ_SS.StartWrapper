@@ -1,5 +1,10 @@
 #include "utils.h"
 #include <winnls.h>
+#include <unistd.h>
+
+int file_exists(const char *filename) {
+    return access(filename, F_OK) != -1;
+}
 
 wchar_t *convertCharToWChar(const char* message){
     // 将 char 字符串转换为 wchar_t 字符串

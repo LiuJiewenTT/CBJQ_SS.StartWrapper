@@ -6,7 +6,7 @@ CPPC = g++.exe
 WINDRES = windres.exe
 
 # 编译选项
-CFLAGS = -I"./"
+CFLAGS = -fdiagnostics-color=always -I"./"
 
 # 源文件和目标文件
 SRC = main.c

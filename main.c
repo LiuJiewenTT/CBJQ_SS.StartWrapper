@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     wchar_t szCmdline[TEMPWSTR_LENGTH];
     pw1 = WCharChar(argv[1]);
     wcsncpy(szCmdline, pw1, TEMPWSTR_LENGTH);
+    free2NULL(pw1);
     szCmdline[TEMPWSTR_LENGTH-1] = 0;
 
     // 启动子进程
@@ -53,13 +54,17 @@ int main(int argc, char **argv) {
     printf("Started child process with PID: %lu\n", pi.dwProcessId);
 
     int exit_value = EXIT_SUCCESS;
+    char tempstr1[TEMPSTR_LENGTH];
+    sprintf(tempstr1, "%s.test", argv[0]);
 
-    // 检查子进程是否以高权限运行
-    if (IsProcessElevated(pi.dwProcessId)) {
-        printf("The child process is running with elevated privileges.\n");
-    } else {
-        printf("The child process is not running with elevated privileges.\n");
-        exit_value = EXIT_FAILURE;
+    if( !file_exists(tempstr1) ){
+        // 检查子进程是否以高权限运行
+        if (IsProcessElevated(pi.dwProcessId)) {
+            printf("The child process is running with elevated privileges.\n");
+        } else {
+            printf("The child process is not running with elevated privileges.\n");
+            exit_value = EXIT_FAILURE;
+        }
     }
 
     // // 等待子进程结束
