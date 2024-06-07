@@ -11,8 +11,14 @@
 #define TEMPWSTR_LENGTH 2048
 
 
+const int check_interval1=100;
+const int check_interval1_maxcnt=10;
+const int check_interval2=1000;
+
+
 // 函数声明
 BOOL IsProcessElevated(DWORD processId);
+BOOL IsProcessRunning(HANDLE hProcess);
 
 int main(int argc, char **argv) {
     if( argc < 2 ){
@@ -59,12 +65,41 @@ int main(int argc, char **argv) {
 
     if( !file_exists(tempstr1) ){
         // 检查子进程是否以高权限运行
-        if (IsProcessElevated(pi.dwProcessId)) {
-            printf("The child process is running with elevated privileges.\n");
-        } else {
-            printf("The child process is not running with elevated privileges.\n");
+        int check_stage=1;
+        int check_cnt=0;
+        int exit_status=0;
+        int elevated=0;
+        do{
+            if (IsProcessElevated(pi.dwProcessId)) {
+                printf("The child process is running with elevated privileges.\n");
+                elevated = 1;
+                break;
+            } else {
+                if( !check_cnt ){
+                    printf("The child process is not running with elevated privileges.\n");
+                }
+                exit_value = EXIT_FAILURE;
+            }
+            if( check_stage == 1 ){
+                ++check_cnt;
+                Sleep(check_interval1);
+                if( check_cnt == check_interval1_maxcnt ){
+                    check_stage = 2;
+                }
+            }
+            else {
+                Sleep(check_interval2);
+            }
+            
+        }while(exit_status=IsProcessRunning(pi.hProcess));
+
+        if(!elevated && !exit_status){
+            printf("The child process was not elevated and does not exist anymore.\n");
             exit_value = EXIT_FAILURE;
         }
+    }
+    else {
+        printf("Found test flag file: %s\n", tempstr1);
     }
 
     // // 等待子进程结束
@@ -105,3 +140,16 @@ BOOL IsProcessElevated(DWORD processId) {
         return FALSE;
     }
 }
+
+
+BOOL IsProcessRunning(HANDLE hProcess) {
+    DWORD exitCode;
+    if (GetExitCodeProcess(hProcess, &exitCode)) {
+        // 如果进程还在运行，exitCode 会是 STILL_ACTIVE
+        return exitCode == STILL_ACTIVE;
+    } else {
+        printf("GetExitCodeProcess failed (%d).\n", GetLastError());
+        return FALSE;
+    }
+}
+
