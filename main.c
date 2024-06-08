@@ -25,6 +25,7 @@ BOOL IsProcessRunning(HANDLE hProcess);
 BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResolvedPathSize);
 BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi);
 BOOL RelaunchWithElevation(int argc, char *argv[]);
+void ReadFromPipes(HANDLE hStdOutRead, HANDLE hStdErrRead);
 
 int main(int argc, char **argv) {
     if( argc < 2 ){
@@ -187,40 +188,7 @@ int main(int argc, char **argv) {
 
     if( flag_supervise ){
         // 读取子进程的输出
-        const int bufferSize = 4096;
-        char buffer_out[bufferSize];
-        char buffer_err[bufferSize];
-        DWORD bytesRead_out, bytesRead_err;
-        int flag_stop_read = 0;
-        int flag_stop_read_out = 0;
-        int flag_stop_read_err = 0;
-        int retv1 = 0, retv2 = 0;
-
-        while( !flag_stop_read ){
-            if( !flag_stop_read_out ){
-                retv1 = ReadFile(hStdOutRead, buffer_out, bufferSize - 1, &bytesRead_out, NULL);
-                if( retv1 && bytesRead_out > 0 ){
-                    buffer_out[bytesRead_out] = 0;
-                    printf("%s", buffer_out);
-                }
-                else {
-                    flag_stop_read_out = 1;
-                }
-            }
-            if( !flag_stop_read_err ){
-                retv2 = ReadFile(hStdErrRead, buffer_err, bufferSize - 1, &bytesRead_err, NULL);
-                if( retv2 && bytesRead_err > 0 ){
-                    buffer_err[bytesRead_err] = 0;
-                    printf("%s", buffer_err);
-                }
-                else {
-                    flag_stop_read_err = 1;
-                }
-            }
-            if( flag_stop_read_out && flag_stop_read_err ){
-                flag_stop_read = 1;
-            }
-        }
+        ReadFromPipes(hStdOutRead, hStdErrRead);
 
         // 等待子进程结束
         WaitForSingleObject(pi.hProcess, INFINITE);
@@ -404,3 +372,80 @@ BOOL RelaunchWithElevation(int argc, char *argv[]) {
     }
 }
 
+
+void ReadFromPipes(HANDLE hStdOutRead, HANDLE hStdErrRead){
+    const int bufferSize = 4096;
+    char buffer_out[bufferSize];
+    char buffer_err[bufferSize];
+    DWORD bytesRead_out, bytesRead_err;
+    OVERLAPPED ol_out = {0};
+    OVERLAPPED ol_err = {0};
+    
+    int flag_stop_read = 0;
+    int flag_stop_read_out = 0;
+    int flag_stop_read_err = 0;
+    int retv1 = 0, retv2 = 0;
+
+    ol_out.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ol_err.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (ol_out.hEvent == NULL) {
+        printf("CreateEvent for stdout failed.\n");
+        return ;
+    }
+    if (ol_err.hEvent == NULL) {
+        printf("CreateEvent for stderr failed.\n");
+        return ;
+    }
+
+    while( !flag_stop_read ){
+        if( !flag_stop_read_out ){
+            retv1 = ReadFile(hStdOutRead, buffer_out, bufferSize - 1, &bytesRead_out, &ol_out);
+            if( !retv1 ){
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    // // 等待读取完成
+                    // WaitForSingleObject(ol.hEvent, INFINITE);
+                    // GetOverlappedResult(hPipeRead, &ol, &bytesRead, FALSE);
+                } else {
+                    printf("ReadFile stdout failed.\n");
+                    break;
+                }
+            }
+            else{
+                if( bytesRead_out > 0 ){
+                    buffer_out[bytesRead_out] = 0;
+                    printf("%s", buffer_out);
+                }
+                else {
+                    flag_stop_read_out = 1;
+                }
+            }
+        }
+        if( !flag_stop_read_err ){
+            retv2 = ReadFile(hStdErrRead, buffer_err, bufferSize - 1, &bytesRead_err, &ol_err);
+            if( !retv2 ){
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    // // 等待读取完成
+                    // WaitForSingleObject(ol.hEvent, INFINITE);
+                    // GetOverlappedResult(hPipeRead, &ol, &bytesRead, FALSE);
+                } else {
+                    printf("ReadFile stderr failed.\n");
+                    break;
+                }
+            }
+            else{
+                if( bytesRead_err > 0 ){
+                    buffer_err[bytesRead_err] = 0;
+                    printf("%s", buffer_err);
+                }
+                else {
+                    flag_stop_read_err = 1;
+                }
+            }
+        }
+        if( flag_stop_read_out && flag_stop_read_err ){
+            flag_stop_read = 1;
+        }
+    }
+}
