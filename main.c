@@ -21,6 +21,7 @@ BOOL IsProcessElevated(DWORD processId);
 BOOL IsProcessRunning(HANDLE hProcess);
 BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResolvedPathSize);
 BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi);
+BOOL RelaunchWithElevation(int argc, char *argv[]);
 
 int main(int argc, char **argv) {
     if( argc < 2 ){
@@ -72,9 +73,18 @@ int main(int argc, char **argv) {
 
         // 检查是否需要提升权限
         if (error == ERROR_ELEVATION_REQUIRED) {
-            printf("Attempting to start with elevation...\n");
-            if (!StartProcessWithElevation(szCmdline, &pi)) {
-                printf("Failed to start with elevation.\n");
+            // printf("Attempting to start with elevation...\n");
+            // if (!StartProcessWithElevation(szCmdline, &pi)) {
+            //     printf("Failed to start with elevation.\n");
+            //     return EXIT_FAILURE;
+            // }
+
+            printf("Attempting to elevate current process...\n");
+            if (RelaunchWithElevation(argc, argv)) {
+                printf("Relaunched process with elevated privileges worked well.\n");
+                return EXIT_SUCCESS;
+            } else {
+                printf("Failed to relaunch with elevated privileges or relaunched process returned failed.\n");
                 return EXIT_FAILURE;
             }
         } else {
@@ -239,5 +249,66 @@ BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi)
     }
 
     return TRUE;
+}
+
+
+// 以提升权限运行当前进程
+BOOL RelaunchWithElevation(int argc, char *argv[]) {
+    wchar_t szPath[MAX_PATH];
+    if (!GetModuleFileName(NULL, szPath, MAX_PATH)) {
+        printf("GetModuleFileName failed (%d).\n", GetLastError());
+        return FALSE;
+    }
+
+    // 构建命令行参数
+    wchar_t cmdLine[TEMPWSTR_LENGTH] = L"";
+    // wcscat(cmdLine, L"\"");
+    // wcscat(cmdLine, szPath);
+    // wcscat(cmdLine, L"\"");
+
+    for (int i = 1; i < argc; ++i) {
+        wcscat(cmdLine, L" ");
+        wcscat(cmdLine, L"\"");
+        wchar_t *arg = WCharChar(argv[i]);
+        wcscat(cmdLine, arg);
+        wcscat(cmdLine, L"\"");
+        free2NULL(arg);
+    }
+
+    wprintf(L"relaunch args=%s\n", cmdLine);
+
+    SHELLEXECUTEINFO sei = { sizeof(sei) };
+    sei.lpVerb = L"runas";
+    sei.lpFile = szPath;
+    sei.lpParameters = cmdLine; 
+    sei.nShow = SW_SHOWNORMAL;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS; // 保持进程句柄
+
+    if (!ShellExecuteEx(&sei)) {
+        printf("ShellExecuteEx failed (%d).\n", GetLastError());
+        return FALSE;
+    }
+
+    // return TRUE;
+
+    // 等待新进程结束
+    WaitForSingleObject(sei.hProcess, INFINITE);
+
+    // 获取新进程的返回值
+    DWORD exitCode;
+    if (!GetExitCodeProcess(sei.hProcess, &exitCode)) {
+        printf("GetExitCodeProcess failed (%d).\n", GetLastError());
+        CloseHandle(sei.hProcess);
+        return FALSE;
+    }
+
+    CloseHandle(sei.hProcess);
+
+    // 判断新进程的返回值
+    if (exitCode == EXIT_SUCCESS) {
+        return TRUE;
+    } else {
+        return FALSE;
+    }
 }
 
