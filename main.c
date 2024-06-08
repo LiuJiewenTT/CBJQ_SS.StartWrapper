@@ -277,63 +277,32 @@ BOOL RelaunchWithElevation(int argc, char *argv[]) {
 
     wprintf(L"relaunch args=%s\n", cmdLine);
 
-    // SHELLEXECUTEINFO sei = { sizeof(sei) };
-    // sei.lpVerb = L"runas";
-    // sei.lpFile = szPath;
-    // sei.lpParameters = cmdLine; 
-    // sei.nShow = SW_SHOWNORMAL;
-    // sei.fMask = SEE_MASK_NOCLOSEPROCESS; // 保持进程句柄
+    SHELLEXECUTEINFO sei = { sizeof(sei) };
+    sei.lpVerb = L"runas";
+    sei.lpFile = szPath;
+    sei.lpParameters = cmdLine; 
+    sei.nShow = SW_SHOWNORMAL;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS; // 保持进程句柄
 
-    // 设置新的启动信息
-    STARTUPINFO si;
-    PROCESS_INFORMATION pi;
-
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    ZeroMemory(&pi, sizeof(pi));
-
-    if (!CreateProcess(
-            NULL,
-            cmdLine,
-            NULL,
-            NULL,
-            FALSE,
-            CREATE_NEW_CONSOLE, // 保持在当前控制台
-            NULL,
-            NULL,
-            &si,
-            &pi)
-    ) {
-        printf("CreateProcess (elevated) failed (%d).\n", GetLastError());
+    if (!ShellExecuteEx(&sei)) {
+        printf("ShellExecuteEx failed (%d).\n", GetLastError());
         return FALSE;
     }
-
-    // if (!ShellExecuteEx(&sei)) {
-    //     printf("ShellExecuteEx failed (%d).\n", GetLastError());
-    //     return FALSE;
-    // }
 
     // return TRUE;
 
     // 等待新进程结束
-    // WaitForSingleObject(sei.hProcess, INFINITE);
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    WaitForSingleObject(sei.hProcess, INFINITE);
 
     // 获取新进程的返回值
     DWORD exitCode;
-    // if (!GetExitCodeProcess(sei.hProcess, &exitCode)) {
-    //     printf("GetExitCodeProcess failed (%d).\n", GetLastError());
-    //     CloseHandle(sei.hProcess);
-    //     return FALSE;
-    // }
-    if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
+    if (!GetExitCodeProcess(sei.hProcess, &exitCode)) {
         printf("GetExitCodeProcess failed (%d).\n", GetLastError());
-        CloseHandle(pi.hProcess);
+        CloseHandle(sei.hProcess);
         return FALSE;
     }
 
-    // CloseHandle(sei.hProcess);
-    CloseHandle(pi.hProcess);
+    CloseHandle(sei.hProcess);
 
     // 判断新进程的返回值
     if (exitCode == EXIT_SUCCESS) {
