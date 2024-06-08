@@ -16,6 +16,7 @@ const int check_interval1_maxcnt=10;
 const int check_interval2=1000;
 
 int flag_unhide = 0;
+int flag_supervise = 0;
 
 
 // 函数声明
@@ -37,8 +38,22 @@ int main(int argc, char **argv) {
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
 
+    // 监视用
+    sprintf(tempstr1, "%s.supervise", argv[0]);
+    if( file_exists(tempstr1) ){
+        flag_supervise = 1;
+    }
+ 
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
+    if( flag_supervise ){
+        // 获取标准输出和标准错误的句柄
+        HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        HANDLE hStdErr = GetStdHandle(STD_ERROR_HANDLE);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = hStdOut;
+        si.hStdError = hStdErr;
+    }    
     ZeroMemory(&pi, sizeof(pi));
 
     // 设置要启动的子进程路径，注意替换为实际要启动的程序路径
@@ -101,6 +116,7 @@ int main(int argc, char **argv) {
     printf("Started child process with PID: %lu\n", pi.dwProcessId);
 
     int exit_value = EXIT_SUCCESS;
+    // 测试用
     sprintf(tempstr1, "%s.test", argv[0]);
 
     if( !file_exists(tempstr1) ){
@@ -142,8 +158,10 @@ int main(int argc, char **argv) {
         printf("Found test flag file: %s\n", tempstr1);
     }
 
-    // // 等待子进程结束
-    // WaitForSingleObject(pi.hProcess, INFINITE);
+    if( flag_supervise ){
+        // 等待子进程结束
+        WaitForSingleObject(pi.hProcess, INFINITE);
+    }
 
     // 关闭进程和线程句柄
     CloseHandle(pi.hProcess);
