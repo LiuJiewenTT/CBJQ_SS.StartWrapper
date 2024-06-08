@@ -19,6 +19,12 @@ int flag_unhide = 0;
 int flag_supervise = 0;
 
 
+typedef struct {
+    HANDLE pipe_read;
+    int thread_id;
+} ThreadData;
+
+
 // 函数声明
 BOOL IsProcessElevated(DWORD processId);
 BOOL IsProcessRunning(HANDLE hProcess);
@@ -26,6 +32,7 @@ BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResol
 BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi);
 BOOL RelaunchWithElevation(int argc, char *argv[]);
 void ReadFromPipes(HANDLE hStdOutRead, HANDLE hStdErrRead);
+DWORD WINAPI ReadFromPipe(LPVOID arg);
 
 int main(int argc, char **argv) {
     if( argc < 2 ){
@@ -374,78 +381,87 @@ BOOL RelaunchWithElevation(int argc, char *argv[]) {
 
 
 void ReadFromPipes(HANDLE hStdOutRead, HANDLE hStdErrRead){
+    HANDLE thread_out, thread_err;
+    HANDLE threads[2];
+    ThreadData threaddata_out={
+        hStdOutRead,
+        0
+    };
+    ThreadData threaddata_err={
+        hStdErrRead,
+        1
+    };
+    thread_out = CreateThread(NULL, 0, ReadFromPipe, &threaddata_out, 0, NULL);
+    thread_err = CreateThread(NULL, 0, ReadFromPipe, &threaddata_err, 0, NULL);
+    threads[0] = thread_out;
+    threads[1] = thread_err;
+    // 等待所有线程完成
+    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+    CloseHandle(thread_out);
+    CloseHandle(thread_err);
+}
+
+
+DWORD WINAPI ReadFromPipe(LPVOID arg) {
+    ThreadData* data = (ThreadData*)arg;
+    HANDLE hPipeRead = data->pipe_read;
     const int bufferSize = 4096;
-    char buffer_out[bufferSize];
-    char buffer_err[bufferSize];
-    DWORD bytesRead_out, bytesRead_err;
-    OVERLAPPED ol_out = {0};
-    OVERLAPPED ol_err = {0};
-    
-    int flag_stop_read = 0;
-    int flag_stop_read_out = 0;
-    int flag_stop_read_err = 0;
-    int retv1 = 0, retv2 = 0;
+    char buffer[bufferSize];
+    DWORD bytesRead;
+    OVERLAPPED ol = {0};
+    char stream_name[TEMPSTR_LENGTH]={""};
 
-    ol_out.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    ol_err.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    if (ol_out.hEvent == NULL) {
-        printf("CreateEvent for stdout failed.\n");
-        return ;
-    }
-    if (ol_err.hEvent == NULL) {
-        printf("CreateEvent for stderr failed.\n");
-        return ;
+    switch(data->thread_id){
+        case 0:{
+            sprintf(stream_name, "stdout");
+            break;
+        }
+        case 1:{
+            sprintf(stream_name, "stderr");
+            break;
+        }
     }
 
-    while( !flag_stop_read ){
-        if( !flag_stop_read_out ){
-            retv1 = ReadFile(hStdOutRead, buffer_out, bufferSize - 1, &bytesRead_out, &ol_out);
-            if( !retv1 ){
-                DWORD err = GetLastError();
-                if (err == ERROR_IO_PENDING) {
-                    // // 等待读取完成
-                    // WaitForSingleObject(ol.hEvent, INFINITE);
-                    // GetOverlappedResult(hPipeRead, &ol, &bytesRead, FALSE);
-                } else {
-                    printf("ReadFile stdout failed.\n");
-                    break;
-                }
-            }
-            else{
-                if( bytesRead_out > 0 ){
-                    buffer_out[bytesRead_out] = 0;
-                    printf("%s", buffer_out);
-                }
-                else {
-                    flag_stop_read_out = 1;
-                }
-            }
-        }
-        if( !flag_stop_read_err ){
-            retv2 = ReadFile(hStdErrRead, buffer_err, bufferSize - 1, &bytesRead_err, &ol_err);
-            if( !retv2 ){
-                DWORD err = GetLastError();
-                if (err == ERROR_IO_PENDING) {
-                    // // 等待读取完成
-                    // WaitForSingleObject(ol.hEvent, INFINITE);
-                    // GetOverlappedResult(hPipeRead, &ol, &bytesRead, FALSE);
-                } else {
-                    printf("ReadFile stderr failed.\n");
-                    break;
-                }
-            }
-            else{
-                if( bytesRead_err > 0 ){
-                    buffer_err[bytesRead_err] = 0;
-                    printf("%s", buffer_err);
-                }
-                else {
-                    flag_stop_read_err = 1;
-                }
-            }
-        }
-        if( flag_stop_read_out && flag_stop_read_err ){
-            flag_stop_read = 1;
-        }
+    // 创建用于通知异步操作完成的事件
+    ol.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (ol.hEvent == NULL) {
+        printf("[%s]: CreateEvent failed.\n", stream_name);
+        return 1;
     }
+
+    while(1) {
+        // 发起异步读取请求
+        if (!ReadFile(hPipeRead, buffer, bufferSize - 1, &bytesRead, &ol)) {
+            DWORD err = GetLastError();
+            if (err == ERROR_IO_PENDING) {
+                // 等待读取完成
+                WaitForSingleObject(ol.hEvent, INFINITE);
+                if (GetOverlappedResult(hPipeRead, &ol, &bytesRead, FALSE)) {
+                    if (bytesRead == 0) {
+                        // 管道已关闭
+                        break;
+                    }
+                    buffer[bytesRead] = '\0';
+                    printf("%s\n", buffer);
+                } else {
+                    printf("[%s]: GetOverlappedResult failed.\n", stream_name);
+                    break;
+                }
+            } else {
+                printf("[%s]: ReadFile failed.\n", stream_name);
+                break;
+            }
+        } else {
+            // ReadFile 立即完成
+            buffer[bytesRead] = '\0';
+            printf("%s", buffer);
+        }
+
+        // 重置事件，准备下一次读取
+        ResetEvent(ol.hEvent);
+    }
+
+    CloseHandle(ol.hEvent);
+
+    return 0;
 }
