@@ -19,11 +19,15 @@ const int check_interval2=1000;
 // 函数声明
 BOOL IsProcessElevated(DWORD processId);
 BOOL IsProcessRunning(HANDLE hProcess);
+BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResolvedPathSize);
+BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi);
 
 int main(int argc, char **argv) {
     if( argc < 2 ){
         return EXIT_FAILURE;
     }
+    printf("arg[0]=%s\n", argv[0]);
+    printf("arg[1]=%s\n", argv[1]);
     wchar_t *pw1 = NULL;
 
     STARTUPINFO si;
@@ -35,10 +39,20 @@ int main(int argc, char **argv) {
 
     // 设置要启动的子进程路径，注意替换为实际要启动的程序路径
     wchar_t szCmdline[TEMPWSTR_LENGTH];
+    wchar_t szResolvedPath[TEMPWSTR_LENGTH];
     pw1 = WCharChar(argv[1]);
     wcsncpy(szCmdline, pw1, TEMPWSTR_LENGTH);
     free2NULL(pw1);
     szCmdline[TEMPWSTR_LENGTH-1] = 0;
+
+    // 解析符号链接到实际路径
+    if (ResolveSymbolicLink(szCmdline, szResolvedPath, TEMPWSTR_LENGTH)) {
+        wprintf(L"Resolved path: %s\n", szResolvedPath);
+        wcscpy(szCmdline, szResolvedPath);
+    } else {
+        printf("Failed to resolve path or symbolic link.\n");
+        return EXIT_FAILURE;
+    }
 
     // 启动子进程
     if (!CreateProcess(
@@ -53,8 +67,19 @@ int main(int argc, char **argv) {
         &si,        // Pointer to STARTUPINFO structure
         &pi)        // Pointer to PROCESS_INFORMATION structure
     ) {
-        printf("CreateProcess failed (%d).\n", GetLastError());
-        return EXIT_FAILURE;
+        DWORD error = GetLastError();
+        printf("CreateProcess failed (%d).\n", error);
+
+        // 检查是否需要提升权限
+        if (error == ERROR_ELEVATION_REQUIRED) {
+            printf("Attempting to start with elevation...\n");
+            if (!StartProcessWithElevation(szCmdline, &pi)) {
+                printf("Failed to start with elevation.\n");
+                return EXIT_FAILURE;
+            }
+        } else {
+            return EXIT_FAILURE;
+        }
     }
 
     printf("Started child process with PID: %lu\n", pi.dwProcessId);
@@ -151,5 +176,68 @@ BOOL IsProcessRunning(HANDLE hProcess) {
         printf("GetExitCodeProcess failed (%d).\n", GetLastError());
         return FALSE;
     }
+}
+
+
+// 解析符号链接到实际路径
+BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResolvedPathSize) {
+    HANDLE hFile = CreateFile(
+        szPath,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf("CreateFile failed (%d).\n", GetLastError());
+        return FALSE;
+    }
+
+    DWORD dwRet = GetFinalPathNameByHandle(hFile, szResolvedPath, dwResolvedPathSize, FILE_NAME_NORMALIZED);
+    if (dwRet == 0 || dwRet > dwResolvedPathSize) {
+        printf("GetFinalPathNameByHandle failed (%d).\n", GetLastError());
+        CloseHandle(hFile);
+        return FALSE;
+    }
+
+    // 去掉前缀 "\\?\"（如果存在）
+    if (wcsncmp(szResolvedPath, L"\\\\?\\", 4) == 0) {
+        wcscpy_s(szResolvedPath, dwResolvedPathSize, szResolvedPath + 4);
+    }
+
+    CloseHandle(hFile);
+    return TRUE;
+}
+
+
+// 以提升权限运行子进程
+BOOL StartProcessWithElevation(wchar_t *szResolvedPath, PROCESS_INFORMATION *pi) {
+    SHELLEXECUTEINFO sei = { sizeof(sei) };
+    sei.lpVerb = L"runas";
+    sei.lpFile = szResolvedPath;
+    sei.hwnd = NULL;
+    sei.nShow = SW_NORMAL;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;  // 请求进程句柄
+
+    if (!ShellExecuteEx(&sei)) {
+        printf("ShellExecuteEx failed (%d).\n", GetLastError());
+        return FALSE;
+    }
+
+    printf("Process started with elevation.\n");
+
+    // 更新 PROCESS_INFORMATION 结构体
+    if (pi != NULL && sei.hProcess != NULL) {
+        pi->hProcess = sei.hProcess;
+        pi->dwProcessId = GetProcessId(sei.hProcess);
+        // hThread 和 dwThreadId 无法通过 ShellExecuteEx 获取，因此保留为 0
+        pi->hThread = NULL;
+        pi->dwThreadId = 0;
+    }
+
+    return TRUE;
 }
 
