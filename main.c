@@ -15,6 +15,8 @@ const int check_interval1=100;
 const int check_interval1_maxcnt=10;
 const int check_interval2=1000;
 
+int flag_unhide = 0;
+
 
 // 函数声明
 BOOL IsProcessElevated(DWORD processId);
@@ -30,6 +32,7 @@ int main(int argc, char **argv) {
     printf("arg[0]=%s\n", argv[0]);
     printf("arg[1]=%s\n", argv[1]);
     wchar_t *pw1 = NULL;
+    char tempstr1[TEMPSTR_LENGTH];
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -54,6 +57,9 @@ int main(int argc, char **argv) {
         printf("Failed to resolve path or symbolic link.\n");
         return EXIT_FAILURE;
     }
+
+    sprintf(tempstr1, "%s.unhide", argv[0]);
+    flag_unhide = file_exists(tempstr1);
 
     // 启动子进程
     if (!CreateProcess(
@@ -95,7 +101,6 @@ int main(int argc, char **argv) {
     printf("Started child process with PID: %lu\n", pi.dwProcessId);
 
     int exit_value = EXIT_SUCCESS;
-    char tempstr1[TEMPSTR_LENGTH];
     sprintf(tempstr1, "%s.test", argv[0]);
 
     if( !file_exists(tempstr1) ){
@@ -281,8 +286,14 @@ BOOL RelaunchWithElevation(int argc, char *argv[]) {
     sei.lpVerb = L"runas";
     sei.lpFile = szPath;
     sei.lpParameters = cmdLine; 
-    sei.nShow = SW_SHOWNORMAL;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS; // 保持进程句柄
+    if( flag_unhide ){
+        sei.nShow = SW_SHOWNORMAL;
+    }
+    else {
+        sei.nShow = SW_HIDE; // 不显示窗口
+    }
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_NOASYNC; 
+    // SEE_MASK_NOCLOSEPROCESS保持进程句柄
 
     if (!ShellExecuteEx(&sei)) {
         printf("ShellExecuteEx failed (%d).\n", GetLastError());
