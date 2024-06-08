@@ -35,6 +35,10 @@ int main(int argc, char **argv) {
     wchar_t *pw1 = NULL;
     char tempstr1[TEMPSTR_LENGTH];
 
+    HANDLE hStdOutRead, hStdOutWrite;
+    HANDLE hStdErrRead, hStdErrWrite;
+    SECURITY_ATTRIBUTES sa;
+
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
 
@@ -42,18 +46,34 @@ int main(int argc, char **argv) {
     sprintf(tempstr1, "%s.supervise", argv[0]);
     if( file_exists(tempstr1) ){
         flag_supervise = 1;
+        printf("Supervise mode enabled.\n");
     }
+
+    if( flag_supervise ){
+        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+        sa.lpSecurityDescriptor = NULL;
+        sa.bInheritHandle = TRUE;   // 必要！
+        // 创建匿名管道
+        if (!CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0) ||
+            !CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0)) {
+            printf("CreatePipe failed.\n");
+            return EXIT_FAILURE;
+        }
+        // 设置写句柄为不可继承
+        if (!SetHandleInformation(hStdOutRead, HANDLE_FLAG_INHERIT, 0) ||
+            !SetHandleInformation(hStdErrRead, HANDLE_FLAG_INHERIT, 0)) {
+            printf("SetHandleInformation failed.\n");
+            return EXIT_FAILURE;
+        }
+    }   
  
     ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
+    si.cb = sizeof(si); 
     if( flag_supervise ){
-        // 获取标准输出和标准错误的句柄
-        HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-        HANDLE hStdErr = GetStdHandle(STD_ERROR_HANDLE);
         si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = hStdOut;
-        si.hStdError = hStdErr;
-    }    
+        si.hStdOutput = hStdOutWrite;
+        si.hStdError = hStdErrWrite;
+    }
     ZeroMemory(&pi, sizeof(pi));
 
     // 设置要启动的子进程路径，注意替换为实际要启动的程序路径
@@ -82,7 +102,7 @@ int main(int argc, char **argv) {
         szCmdline,  // Command line
         NULL,       // Process handle not inheritable
         NULL,       // Thread handle not inheritable
-        FALSE,      // Set handle inheritance to FALSE
+        TRUE,      // Set handle inheritance to FALSE
         0,          // No creation flags
         NULL,       // Use parent's environment block
         NULL,       // Use parent's starting directory 
@@ -111,6 +131,13 @@ int main(int argc, char **argv) {
         } else {
             return EXIT_FAILURE;
         }
+    }
+    else {
+        if( flag_supervise ){
+            // 关闭不需要的写句柄
+            CloseHandle(hStdOutWrite);
+            CloseHandle(hStdErrWrite);
+        }   
     }
 
     printf("Started child process with PID: %lu\n", pi.dwProcessId);
@@ -159,6 +186,42 @@ int main(int argc, char **argv) {
     }
 
     if( flag_supervise ){
+        // 读取子进程的输出
+        const int bufferSize = 4096;
+        char buffer_out[bufferSize];
+        char buffer_err[bufferSize];
+        DWORD bytesRead_out, bytesRead_err;
+        int flag_stop_read = 0;
+        int flag_stop_read_out = 0;
+        int flag_stop_read_err = 0;
+        int retv1 = 0, retv2 = 0;
+
+        while( !flag_stop_read ){
+            if( !flag_stop_read_out ){
+                retv1 = ReadFile(hStdOutRead, buffer_out, bufferSize - 1, &bytesRead_out, NULL);
+                if( retv1 && bytesRead_out > 0 ){
+                    buffer_out[bytesRead_out] = 0;
+                    printf("%s", buffer_out);
+                }
+                else {
+                    flag_stop_read_out = 1;
+                }
+            }
+            if( !flag_stop_read_err ){
+                retv2 = ReadFile(hStdErrRead, buffer_err, bufferSize - 1, &bytesRead_err, NULL);
+                if( retv2 && bytesRead_err > 0 ){
+                    buffer_err[bytesRead_err] = 0;
+                    printf("%s", buffer_err);
+                }
+                else {
+                    flag_stop_read_err = 1;
+                }
+            }
+            if( flag_stop_read_out && flag_stop_read_err ){
+                flag_stop_read = 1;
+            }
+        }
+
         // 等待子进程结束
         WaitForSingleObject(pi.hProcess, INFINITE);
     }
