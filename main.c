@@ -56,6 +56,8 @@ int main(int argc, char **argv) {
         flag_supervise = 1;
         printf("Supervise mode enabled.\n");
     }
+    fflush(stdout);
+    fflush(stderr);
 
     if( flag_supervise ){
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -107,6 +109,9 @@ int main(int argc, char **argv) {
     sprintf(tempstr1, "%s.unhide", argv[0]);
     flag_unhide = file_exists(tempstr1);
 
+    fflush(stdout);
+    fflush(stderr);
+
     // 启动子进程
     if (!CreateProcess(
         NULL,       // No module name (use command line)
@@ -135,6 +140,9 @@ int main(int argc, char **argv) {
                 printf("Supervise mode is not ready for this.\n");
             }
             printf("Attempting to elevate current process...\n");
+            // flushall();
+            fflush(stdout);
+            fflush(stderr);
             if (RelaunchWithElevation(argc, argv)) {
                 printf("Relaunched process with elevated privileges worked well.\n");
                 return EXIT_SUCCESS;

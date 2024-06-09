@@ -26,7 +26,7 @@ all: $(TARGET)
 
 # 链接目标文件生成可执行文件
 $(TARGET): $(OBJ)
-	$(CC) $(OBJ) -o $(TARGET)
+	$(CC) -fdiagnostics-color=always $(OBJ) -o $(TARGET)
 
 # 编译源文件生成目标文件
 # build/%.o: src/%.c
