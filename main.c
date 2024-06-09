@@ -96,6 +96,9 @@ int main(int argc, char **argv) {
     if (ResolveSymbolicLink(szCmdline, szResolvedPath, TEMPWSTR_LENGTH)) {
         wprintf(L"Resolved path: %s\n", szResolvedPath);
         wcscpy(szCmdline, szResolvedPath);
+        for(int i=2; i<argc; ++i){
+            snwprintf(szCmdline, TEMPWSTR_LENGTH, L" \"%s\"", argv[i]);
+        }
     } else {
         printf("Failed to resolve path or symbolic link.\n");
         return EXIT_FAILURE;
@@ -110,7 +113,7 @@ int main(int argc, char **argv) {
         szCmdline,  // Command line
         NULL,       // Process handle not inheritable
         NULL,       // Thread handle not inheritable
-        TRUE,      // Set handle inheritance to FALSE
+        TRUE,       // Set handle inheritance to FALSE
         0,          // No creation flags
         NULL,       // Use parent's environment block
         NULL,       // Use parent's starting directory 
@@ -127,7 +130,10 @@ int main(int argc, char **argv) {
             //     printf("Failed to start with elevation.\n");
             //     return EXIT_FAILURE;
             // }
-
+            
+            if( flag_supervise ){
+                printf("Supervise mode is not ready for this.\n");
+            }
             printf("Attempting to elevate current process...\n");
             if (RelaunchWithElevation(argc, argv)) {
                 printf("Relaunched process with elevated privileges worked well.\n");
