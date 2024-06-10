@@ -37,7 +37,9 @@ DWORD WINAPI ReadFromPipe(LPVOID arg);
 int main(int argc, char **argv) {
     if( argc < 2 ){
         return EXIT_FAILURE;
-    }
+    }+
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
     printf("arg[0]=%s\n", argv[0]);
     printf("arg[1]=%s\n", argv[1]);
     wchar_t *pw1 = NULL;
@@ -49,6 +51,7 @@ int main(int argc, char **argv) {
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
+    int creation_flag = 0;
 
     // 监视用
     sprintf(tempstr1, "%s.supervise", argv[0]);
@@ -56,8 +59,9 @@ int main(int argc, char **argv) {
         flag_supervise = 1;
         printf("Supervise mode enabled.\n");
     }
-    fflush(stdout);
-    fflush(stderr);
+    else {
+        creation_flag = DETACHED_PROCESS;
+    }
 
     if( flag_supervise ){
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -109,9 +113,6 @@ int main(int argc, char **argv) {
     sprintf(tempstr1, "%s.unhide", argv[0]);
     flag_unhide = file_exists(tempstr1);
 
-    fflush(stdout);
-    fflush(stderr);
-
     // 启动子进程
     if (!CreateProcess(
         NULL,       // No module name (use command line)
@@ -119,7 +120,7 @@ int main(int argc, char **argv) {
         NULL,       // Process handle not inheritable
         NULL,       // Thread handle not inheritable
         TRUE,       // Set handle inheritance to FALSE
-        0,          // No creation flags
+        creation_flag,          // No creation flags
         NULL,       // Use parent's environment block
         NULL,       // Use parent's starting directory 
         &si,        // Pointer to STARTUPINFO structure
@@ -140,9 +141,7 @@ int main(int argc, char **argv) {
                 printf("Supervise mode is not ready for this.\n");
             }
             printf("Attempting to elevate current process...\n");
-            // flushall();
-            fflush(stdout);
-            fflush(stderr);
+
             if (RelaunchWithElevation(argc, argv)) {
                 printf("Relaunched process with elevated privileges worked well.\n");
                 return EXIT_SUCCESS;
