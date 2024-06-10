@@ -60,7 +60,9 @@ int main(int argc, char **argv) {
         printf("Supervise mode enabled.\n");
     }
     else {
-        creation_flag = DETACHED_PROCESS;
+        // creation_flag = DETACHED_PROCESS;
+        // creation_flag = CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP;
+        creation_flag = CREATE_NEW_CONSOLE;
     }
 
     if( flag_supervise ){
