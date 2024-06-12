@@ -51,7 +51,11 @@ int main(int argc, char **argv) {
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
+
+    SHELLEXECUTEINFO sei = { sizeof(sei) };
+
     int creation_flag = 0;
+    int x;
 
     // 监视用
     sprintf(tempstr1, "%s.supervise", argv[0]);
@@ -95,6 +99,7 @@ int main(int argc, char **argv) {
     // 设置要启动的子进程路径，注意替换为实际要启动的程序路径
     wchar_t szCmdline[TEMPWSTR_LENGTH];
     wchar_t szResolvedPath[TEMPWSTR_LENGTH];
+    int length_szResolvedPath = 0;
     pw1 = WCharChar(argv[1]);
     wcsncpy(szCmdline, pw1, TEMPWSTR_LENGTH);
     free2NULL(pw1);
@@ -103,9 +108,12 @@ int main(int argc, char **argv) {
     // 解析符号链接到实际路径
     if (ResolveSymbolicLink(szCmdline, szResolvedPath, TEMPWSTR_LENGTH)) {
         wprintf(L"Resolved path: %s\n", szResolvedPath);
+        length_szResolvedPath = wcslen(szResolvedPath);
         wcscpy(szCmdline, szResolvedPath);
+        int templength = length_szResolvedPath;
         for(int i=2; i<argc; ++i){
-            snwprintf(szCmdline, TEMPWSTR_LENGTH, L" \"%s\"", argv[i]);
+            snwprintf(szCmdline + templength, TEMPWSTR_LENGTH, L" \"%s\"", argv[i]);
+            templength += strlen(argv[i]) + 3;
         }
     } else {
         printf("Failed to resolve path or symbolic link.\n");
@@ -116,18 +124,29 @@ int main(int argc, char **argv) {
     flag_unhide = file_exists(tempstr1);
 
     // 启动子进程
-    if (!CreateProcess(
-        NULL,       // No module name (use command line)
-        szCmdline,  // Command line
-        NULL,       // Process handle not inheritable
-        NULL,       // Thread handle not inheritable
-        TRUE,       // Set handle inheritance to FALSE
-        creation_flag,          // No creation flags
-        NULL,       // Use parent's environment block
-        NULL,       // Use parent's starting directory 
-        &si,        // Pointer to STARTUPINFO structure
-        &pi)        // Pointer to PROCESS_INFORMATION structure
-    ) {
+    if( flag_supervise ){
+        x = CreateProcess(
+                            NULL,       // No module name (use command line)
+                            szCmdline,  // Command line
+                            NULL,       // Process handle not inheritable
+                            NULL,       // Thread handle not inheritable
+                            TRUE,       // Set handle inheritance to FALSE
+                            creation_flag,          // No creation flags
+                            NULL,       // Use parent's environment block
+                            NULL,       // Use parent's starting directory 
+                            &si,        // Pointer to STARTUPINFO structure
+                            &pi);       // Pointer to PROCESS_INFORMATION structure
+    }
+    else {
+        sei.lpFile = szResolvedPath;
+        sei.lpParameters = &szCmdline[length_szResolvedPath+1];
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.nShow = SW_SHOWNORMAL;
+        x = ShellExecuteEx(&sei);
+    }
+    
+    // 依启动结果处理
+    if (!x) {
         DWORD error = GetLastError();
         printf("CreateProcess failed (%d).\n", error);
 
@@ -163,7 +182,18 @@ int main(int argc, char **argv) {
         }   
     }
 
-    printf("Started child process with PID: %lu\n", pi.dwProcessId);
+    int subprocess_id;
+    HANDLE subprocess_handle;
+    if( flag_supervise ){
+        subprocess_id = pi.dwProcessId;
+        subprocess_handle = pi.hProcess;
+    }
+    else {
+        subprocess_id = GetProcessId(sei.hProcess);
+        subprocess_handle = sei.hProcess;
+    }
+    printf("Started child process with PID: %lu\n", subprocess_id);
+    
 
     int exit_value = EXIT_SUCCESS;
     // 测试用
@@ -176,7 +206,7 @@ int main(int argc, char **argv) {
         int exit_status=0;
         int elevated=0;
         do{
-            if (IsProcessElevated(pi.dwProcessId)) {
+            if (IsProcessElevated(subprocess_id)) {
                 printf("The child process is running with elevated privileges.\n");
                 elevated = 1;
                 break;
@@ -197,7 +227,7 @@ int main(int argc, char **argv) {
                 Sleep(check_interval2);
             }
             
-        }while(exit_status=IsProcessRunning(pi.hProcess));
+        }while(exit_status=IsProcessRunning(subprocess_handle));
 
         if(!elevated && !exit_status){
             printf("The child process was not elevated and does not exist anymore.\n");
@@ -213,7 +243,7 @@ int main(int argc, char **argv) {
         ReadFromPipes(hStdOutRead, hStdErrRead);
 
         // 等待子进程结束
-        WaitForSingleObject(pi.hProcess, INFINITE);
+        WaitForSingleObject(subprocess_handle, INFINITE);
     }
 
     // 关闭进程和线程句柄
