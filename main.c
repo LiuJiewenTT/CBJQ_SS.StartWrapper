@@ -17,6 +17,7 @@ const int check_interval2=1000;
 
 int flag_unhide = 0;
 int flag_supervise = 0;
+int flag_need_UAC_start = 0;
 
 
 typedef struct {
@@ -26,6 +27,7 @@ typedef struct {
 
 
 // 函数声明
+BOOL IsRunAsAdmin();
 BOOL IsProcessElevated(DWORD processId);
 BOOL IsProcessRunning(HANDLE hProcess);
 BOOL ResolveSymbolicLink(wchar_t *szPath, wchar_t *szResolvedPath, DWORD dwResolvedPathSize);
@@ -56,6 +58,22 @@ int main(int argc, char **argv) {
 
     int creation_flag = 0;
     int x;
+
+    // 检查自身UAC授权情况
+    if (IsRunAsAdmin()) {
+        printf("This process has UAC authorization (Run as Administrator).\n");
+    } else {
+        printf("This process does not have UAC authorization.\n");
+        printf("Relaunching with UAC request.\n");
+        if( RelaunchWithElevation(argc, argv) ){
+            printf("Relaunched process with elevated privileges worked well.\n");
+            return EXIT_SUCCESS;
+        }
+        else {
+            printf("Failed to relaunch with elevated privileges or relaunched process returned failed.\n");
+            return EXIT_FAILURE;
+        }
+    }
 
     // 监视用
     sprintf(tempstr1, "%s.supervise", argv[0]);
@@ -211,6 +229,19 @@ int main(int argc, char **argv) {
                 elevated = 1;
                 break;
             } else {
+                if( flag_need_UAC_start ){
+                    // Now it's too late. These codes are deprecated.
+                    printf("It's too late to check result. NO ACCESS.\n");
+                    return EXIT_SUCCESS;
+                    if( RelaunchWithElevation(argc, argv) ){
+                        printf("Relaunched process with elevated privileges worked well. Now it's too late. These codes are deprecated.\n");
+                        return EXIT_SUCCESS;
+                    }
+                    else {
+                        printf("Failed to relaunch with elevated privileges or relaunched process returned failed.\n");
+                        return EXIT_FAILURE;
+                    }
+                }
                 if( !check_cnt ){
                     printf("The child process is not running with elevated privileges.\n");
                 }
@@ -253,11 +284,35 @@ int main(int argc, char **argv) {
     return exit_value;
 }
 
+
+BOOL IsRunAsAdmin() {
+    BOOL isAdmin = FALSE;
+    HANDLE hToken = NULL;
+
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        TOKEN_ELEVATION elevation;
+        DWORD size;
+        
+        if (GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &size)) {
+            isAdmin = elevation.TokenIsElevated;
+        }
+
+        CloseHandle(hToken);
+    }
+
+    return isAdmin;
+}
+
 // 检查指定进程是否以管理员权限运行
 BOOL IsProcessElevated(DWORD processId) {
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId);
+    int errorcode = 0;
     if (hProcess == NULL) {
-        printf("OpenProcess failed (%d).\n", GetLastError());
+        errorcode = GetLastError();
+        printf("OpenProcess failed (%d).\n", errorcode);
+        if( errorcode == ERROR_ACCESS_DENIED ){
+            flag_need_UAC_start = 1;
+        }
         return FALSE;
     }
 
