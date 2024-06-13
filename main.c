@@ -59,6 +59,9 @@ int main(int argc, char **argv) {
     int creation_flag = 0;
     int x;
 
+    sprintf(tempstr1, "%s.unhide", argv[0]);
+    flag_unhide = file_exists(tempstr1);
+
     // 检查自身UAC授权情况
     if (IsRunAsAdmin()) {
         printf("This process has UAC authorization (Run as Administrator).\n");
@@ -137,9 +140,6 @@ int main(int argc, char **argv) {
         printf("Failed to resolve path or symbolic link.\n");
         return EXIT_FAILURE;
     }
-
-    sprintf(tempstr1, "%s.unhide", argv[0]);
-    flag_unhide = file_exists(tempstr1);
 
     // 启动子进程
     if( flag_supervise ){
