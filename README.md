@@ -1,6 +1,9 @@
 ---
 LANG: zh_CN.UTF-8
 date: 2024-06-07 15:51:00 +0800
+permalink: /
+redirect_from:
+  - /README/
 ---
 
 # CBJQ_SS StartWrapper
